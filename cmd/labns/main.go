@@ -12,6 +12,6 @@ const (
 
 func main() {
 	conn, _ := net.ListenUDP("udp", &net.UDPAddr{Port: SERVICE_DNS_PORT})
-	service := dns.CreateBaseDNSService(conn)
-	service.StartListener()
+	service := dns.CreateNewDNSService(conn)
+	service.Start()
 }
