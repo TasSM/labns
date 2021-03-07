@@ -8,11 +8,16 @@ import (
 	"golang.org/x/net/dns/dnsmessage"
 )
 
-func HashMessageFields(m *dnsmessage.Message) (string, error) {
+func HashMessageFields(msgSerial *[]byte) (string, error) {
 	hf := md5.New()
 	defer hf.Reset()
+	var m dnsmessage.Message
 	var arr []string
 	var sortedString = ""
+	err := m.Unpack(*msgSerial)
+	if err != nil {
+		return "", err
+	}
 	if m.Header.Response {
 		for _, v := range m.Answers {
 			arr = append(arr, v.Header.Name.String())
