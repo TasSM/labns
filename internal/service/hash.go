@@ -1,4 +1,4 @@
-package dns
+package service
 
 import (
 	"crypto/md5"
@@ -18,19 +18,9 @@ func HashMessageFields(msgSerial *[]byte) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if m.Header.Response {
-		for _, v := range m.Answers {
-			arr = append(arr, v.Header.Name.String())
-		}
-		sort.Strings(arr)
-		for _, v := range arr {
-			sortedString += v
-		}
-		hf.Write([]byte(sortedString))
-		return string([]byte(hex.EncodeToString(hf.Sum(nil))[15:31])), nil
-	}
 	for _, v := range m.Questions {
 		arr = append(arr, v.Name.String())
+		arr = append(arr, v.Type.String())
 	}
 	sort.Strings(arr)
 	for _, v := range arr {

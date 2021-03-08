@@ -16,12 +16,9 @@ const (
 	config_path = "./test.json" //"/etc/labdns/config.json"
 )
 
-var (
-	PermittedRecordTypes []string = []string{"A", "AAAA", "CNAME"}
-)
-
 type Configuration struct {
-	LocalRecords []defs.LocalDNSRecord
+	LocalRecords        []defs.LocalDNSRecord
+	UpstreamNameservers []defs.UpstreamNameserver
 }
 
 func LoadConfig() (*Configuration, error) {
@@ -50,11 +47,31 @@ func LoadConfig() (*Configuration, error) {
 			return nil, errors.New(fmt.Sprintf("Target for LocalRecord at index %d is invalid (check type and target format)", k))
 		}
 	}
+	for k, v := range config.UpstreamNameservers {
+		if v.Port == 0 {
+			v.Port = 53
+		}
+		if v.IPv4 == "" && v.IPv6 == "" {
+			return nil, errors.New(fmt.Sprintf("IPv4 OR IPv6 of upstream nameserver at index %v must be provided", k))
+		}
+		if v.IPv4 != "" {
+			parsed := net.ParseIP(v.IPv4)
+			if parsed == nil {
+				return nil, errors.New(fmt.Sprintf("IPv4 of upstream nameserver at index %v is invalid", k))
+			}
+		}
+		if v.IPv6 != "" {
+			parsed := net.ParseIP(v.IPv4)
+			if parsed == nil {
+				return nil, errors.New(fmt.Sprintf("IPv6 of upstream nameserver at index %v is invalid", k))
+			}
+		}
+	}
 	return config, nil
 }
 
 func isValidRecordName(name string) bool {
-	matched, err := regexp.MatchString(`^[a-zA-Z0-9-.]*\.$`, name)
+	matched, err := regexp.MatchString(defs.VALID_FQDN_REGEX, name)
 	if err != nil {
 		log.Println(err.Error())
 		return false
@@ -63,7 +80,7 @@ func isValidRecordName(name string) bool {
 }
 
 func isValidType(parsedType string) bool {
-	for _, v := range PermittedRecordTypes {
+	for _, v := range defs.PermittedRecordTypes {
 		if parsedType == v {
 			return true
 		}
@@ -82,7 +99,7 @@ func isValidTarget(parsedType string, parsedTarget string) bool {
 	case "AAAA":
 		return net.ParseIP(parsedTarget).To16() != nil
 	case "CNAME":
-		matched, err := regexp.MatchString(`^[a-zA-Z0-9-.]*$`, parsedTarget)
+		matched, err := regexp.MatchString(defs.VALID_FQDN_REGEX, parsedTarget)
 		if err != nil {
 			log.Println(err.Error())
 			return false
