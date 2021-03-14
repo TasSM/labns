@@ -16,18 +16,13 @@ const (
 	config_path = "./test.json" //"/etc/labdns/config.json"
 )
 
-type Configuration struct {
-	LocalRecords        []defs.LocalDNSRecord
-	UpstreamNameservers []defs.UpstreamNameserver
-}
-
-func LoadConfig() (*Configuration, error) {
+func LoadConfig() (*defs.Configuration, error) {
 	file, err := os.Open(config_path)
 	if err != nil {
 		return nil, err
 	}
 	defer file.Close()
-	config := &Configuration{}
+	config := &defs.Configuration{}
 	decoder := json.NewDecoder(file)
 	err = decoder.Decode(config)
 	if err != nil {
@@ -47,27 +42,40 @@ func LoadConfig() (*Configuration, error) {
 			return nil, errors.New(fmt.Sprintf("Target for LocalRecord at index %d is invalid (check type and target format)", k))
 		}
 	}
-	for k, v := range config.UpstreamNameservers {
-		if v.Port == 0 {
-			v.Port = 53
-		}
-		if v.IPv4 == "" && v.IPv6 == "" {
-			return nil, errors.New(fmt.Sprintf("IPv4 OR IPv6 of upstream nameserver at index %v must be provided", k))
-		}
-		if v.IPv4 != "" {
-			parsed := net.ParseIP(v.IPv4)
-			if parsed == nil {
-				return nil, errors.New(fmt.Sprintf("IPv4 of upstream nameserver at index %v is invalid", k))
-			}
-		}
-		if v.IPv6 != "" {
-			parsed := net.ParseIP(v.IPv4)
-			if parsed == nil {
-				return nil, errors.New(fmt.Sprintf("IPv6 of upstream nameserver at index %v is invalid", k))
-			}
-		}
+	err = ValidateNameserver(&config.UpstreamNameservers.Primary)
+	if err != nil {
+		return nil, err
+	}
+	err = ValidateNameserver(&config.UpstreamNameservers.Secondary)
+	if err != nil {
+		return nil, err
+	}
+	if config.UpstreamNameservers.TimeoutMs == 0 {
+		config.UpstreamNameservers.TimeoutMs = 5000
 	}
 	return config, nil
+}
+
+func ValidateNameserver(ns *defs.Nameserver) error {
+	if ns.Port == 0 {
+		ns.Port = 53
+	}
+	if ns.IPv4 == "" && ns.IPv6 == "" {
+		return errors.New(fmt.Sprintf("IPv4 OR IPv6 of upstream nameserver must be provided"))
+	}
+	if ns.IPv4 != "" {
+		parsed := net.ParseIP(ns.IPv4)
+		if parsed == nil {
+			return errors.New(fmt.Sprintf("IPv4 of upstream nameserver is invalid: %v", ns.IPv4))
+		}
+	}
+	if ns.IPv6 != "" {
+		parsed := net.ParseIP(ns.IPv6)
+		if parsed == nil {
+			return errors.New(fmt.Sprintf("IPv6 of upstream nameserver is invalid %v", ns.IPv6))
+		}
+	}
+	return nil
 }
 
 func isValidRecordName(name string) bool {

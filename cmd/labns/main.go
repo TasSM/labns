@@ -15,11 +15,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to load configuration %s", err.Error())
 	}
-	locals, err := service.CreateLocalRecords(conf)
-	if err != nil {
-		log.Fatalf("failed to create local records %s", err.Error())
-	}
 
 	conn, _ := net.ListenUDP("udp", &net.UDPAddr{Port: defs.SERVICE_DNS_PORT})
-	service.StartDNSService(conn, locals)
+	service.StartDNSService(conn, conf)
 }

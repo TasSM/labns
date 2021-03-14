@@ -1,23 +1,47 @@
 package service
 
 import (
+	"errors"
 	"log"
 	"net"
 
+	"github.com/TasSM/labns/internal/defs"
 	"golang.org/x/net/dns/dnsmessage"
 )
 
-var conn *net.UDPConn
-var localRecords map[string][]byte
-var state = CreateNewStateMap()
+var (
+	conn         *net.UDPConn
+	localRecords map[string][]byte
+)
 
-// move state management to a goroutine
-// var stateWriter chan int
-// var stateReader chan int
+func requestUpstream(ns *defs.Nameserver, payload []byte) error {
+	var target net.UDPAddr
+	if ns.IPv4 == "" && ns.IPv6 == "" {
+		return errors.New("Cannot forward to invalid upstream: neither IPv4 or IPv6 specified")
+	}
+	if ns.IPv4 != "" {
+		ipv4 := [4]byte{}
+		ip := net.ParseIP(ns.IPv4).To4()
+		copy(ipv4[:], ip)
+		target = net.UDPAddr{IP: ip, Port: int(ns.Port)}
+	} else {
+		ipv6 := [16]byte{}
+		ip := net.ParseIP(ns.IPv6).To16()
+		copy(ipv6[:], ip)
+		target = net.UDPAddr{IP: ip, Port: int(ns.Port)}
+	}
+	go conn.WriteToUDP(payload, &target)
+	return nil
+}
 
-func StartDNSService(c *net.UDPConn, l map[string][]byte) {
+func StartDNSService(c *net.UDPConn, conf *defs.Configuration) {
+	localRecords, err := CreateLocalRecords(conf)
+	if err != nil {
+		log.Fatalf("failed to create local records %s", err.Error())
+	}
 	conn = c
-	localRecords = l
+	var reqChan = make(chan defs.StateOperation, 64)
+	go processStateFlow(reqChan, conf)
 	log.Printf("Starting Listener service on port %s", conn.LocalAddr().String())
 	for {
 		buf := make([]byte, 512)
@@ -35,24 +59,8 @@ func StartDNSService(c *net.UDPConn, l map[string][]byte) {
 			if err != nil {
 				log.Fatalf("error encountered: %v", err.Error())
 			}
-			go func() {
-				log.Printf("key is %v", key)
-				adlist, err := state.RetrieveAndDelete(key)
-				if err != nil {
-					log.Fatalf("Received invalid key from upstream request: %v", err.Error())
-				}
-				if len(adlist) == 1 {
-					go conn.WriteToUDP(packed, adlist[0].Addr)
-					return
-				}
-				for _, v := range adlist {
-					res, err := SetResponseId(packed, v.RequestId)
-					if err != nil {
-						log.Fatalf("Unable to set response ID: %v", err.Error())
-					}
-					go conn.WriteToUDP(res, v.Addr)
-				}
-			}()
+			//trigger response writing
+			reqChan <- defs.StateOperation{Operation: defs.OpRespond, RequestKey: key, ByteData: packed, Conn: conn}
 			continue
 		} else {
 			log.Printf("Received request: %v", m.Questions)
@@ -69,11 +77,8 @@ func StartDNSService(c *net.UDPConn, l map[string][]byte) {
 				go conn.WriteToUDP(res, addr)
 				continue
 			}
-			isCreated := state.AddRequestor(key, addr, m.ID)
-			if isCreated {
-				resolver := net.UDPAddr{IP: net.IP{1, 1, 1, 1}, Port: 53}
-				go conn.WriteToUDP(packed, &resolver)
-			}
+			//trigger a new request state to manage
+			reqChan <- defs.StateOperation{Operation: defs.OpAdd, RequestKey: key, RequestData: &defs.PendingRequestState{Addr: addr, RequestId: m.ID}, ByteData: packed}
 		}
 	}
 }

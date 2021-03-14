@@ -5,12 +5,11 @@ import (
 	"log"
 	"net"
 
-	"github.com/TasSM/labns/internal/config"
 	"github.com/TasSM/labns/internal/defs"
 	"golang.org/x/net/dns/dnsmessage"
 )
 
-func CreateLocalRecords(conf *config.Configuration) (map[string][]byte, error) {
+func CreateLocalRecords(conf *defs.Configuration) (map[string][]byte, error) {
 	out := make(map[string][]byte)
 	for _, v := range conf.LocalRecords {
 		msg, err := BuildDNSMessage(&v)

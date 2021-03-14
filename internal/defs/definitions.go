@@ -6,6 +6,7 @@ import (
 	"golang.org/x/net/dns/dnsmessage"
 )
 
+// Application Constants
 const (
 	SERVICE_DNS_PORT = 2001
 	VALID_FQDN_REGEX = `^[a-zA-Z0-9-.]*\.$`
@@ -20,18 +21,18 @@ var (
 	PermittedRecordTypes []string = []string{"A", "AAAA", "CNAME"}
 )
 
-type DNSService interface {
-	Start()
-}
+type Operation uint16
+
+const (
+	OpCallback Operation = 1
+	OpAdd      Operation = 2
+	OpRespond  Operation = 3
+	OpDelete   Operation = 4
+)
 
 type PendingRequestState struct {
 	Addr      *net.UDPAddr
 	RequestId uint16
-}
-
-type StateMap interface {
-	AddRequestor(key string, addr *net.UDPAddr, id uint16) bool
-	RetrieveAndDelete(key string) ([]PendingRequestState, error)
 }
 
 type LocalDNSRecord struct {
@@ -41,8 +42,27 @@ type LocalDNSRecord struct {
 	Target string
 }
 
-type UpstreamNameserver struct {
+type Nameserver struct {
 	IPv4 string
 	IPv6 string
 	Port uint16
+}
+
+type UpstreamNameservers struct {
+	Primary   Nameserver
+	Secondary Nameserver
+	TimeoutMs uint16
+}
+
+type Configuration struct {
+	LocalRecords        []LocalDNSRecord
+	UpstreamNameservers UpstreamNameservers
+}
+
+type StateOperation struct {
+	Operation   Operation
+	RequestKey  string
+	RequestData *PendingRequestState
+	ByteData    []byte
+	Conn        *net.UDPConn
 }
