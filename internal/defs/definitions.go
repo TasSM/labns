@@ -6,7 +6,6 @@ import (
 	"golang.org/x/net/dns/dnsmessage"
 )
 
-// Application Constants
 const (
 	SERVICE_DNS_PORT = 2001
 	VALID_FQDN_REGEX = `^[a-zA-Z0-9-.]*\.$`

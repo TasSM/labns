@@ -2,10 +2,12 @@ package service
 
 import (
 	"errors"
-	"log"
 	"net"
+	"strconv"
+	"strings"
 
 	"github.com/TasSM/labns/internal/defs"
+	"github.com/TasSM/labns/internal/logging"
 	"golang.org/x/net/dns/dnsmessage"
 )
 
@@ -23,6 +25,28 @@ func CreateLocalRecords(conf *defs.Configuration) (map[string][]byte, error) {
 		out[hash] = msg
 	}
 	return out, nil
+}
+
+func GetAddressFromResource(resource dnsmessage.Resource) string {
+	str := resource.Body.GoString()
+	res := ""
+	switch resource.Header.Type {
+	case dnsmessage.TypeA:
+		res = strings.ReplaceAll(str[strings.LastIndex(str, "{")+1:strings.Index(str, "}")], ", ", ".")
+	case dnsmessage.TypeAAAA:
+		tmp := strings.Split(strings.ReplaceAll(str[strings.LastIndex(str, "{")+1:strings.Index(str, "}")], ",", ""), " ")
+		bytes := make([]byte, 16)
+		for i := 0; i < 16; i++ {
+			val, err := strconv.ParseUint(tmp[i], 10, 8)
+			if err != nil {
+				logging.LogMessage(logging.LogError, "Unable to parse byte value from string "+tmp[i])
+			}
+			bytes[i] = uint8(val)
+		}
+		var ip net.IP = bytes
+		res = ip.To16().String()
+	}
+	return res
 }
 
 func BuildDNSMessage(record *defs.LocalDNSRecord) ([]byte, error) {
@@ -77,7 +101,7 @@ func BuildDNSMessage(record *defs.LocalDNSRecord) ([]byte, error) {
 		err = builder.AAAAResource(header, dnsmessage.AAAAResource{AAAA: ipv6})
 	}
 	if err != nil {
-		log.Printf(err.Error())
+		logging.LogMessage(logging.LogError, err.Error())
 	}
 	msg, err := builder.Finish()
 	if err != nil {

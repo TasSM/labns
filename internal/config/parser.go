@@ -4,12 +4,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"net"
 	"os"
 	"regexp"
 
 	"github.com/TasSM/labns/internal/defs"
+	"github.com/TasSM/labns/internal/logging"
 )
 
 const (
@@ -81,7 +81,7 @@ func ValidateNameserver(ns *defs.Nameserver) error {
 func isValidRecordName(name string) bool {
 	matched, err := regexp.MatchString(defs.VALID_FQDN_REGEX, name)
 	if err != nil {
-		log.Println(err.Error())
+		logging.LogMessage(logging.LogFatal, err.Error())
 		return false
 	}
 	return matched
@@ -109,7 +109,7 @@ func isValidTarget(parsedType string, parsedTarget string) bool {
 	case "CNAME":
 		matched, err := regexp.MatchString(defs.VALID_FQDN_REGEX, parsedTarget)
 		if err != nil {
-			log.Println(err.Error())
+			logging.LogMessage(logging.LogFatal, err.Error())
 			return false
 		}
 		for i := 0; i < len(runes)-1; i++ {
