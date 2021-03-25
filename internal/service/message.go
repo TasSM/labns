@@ -56,7 +56,7 @@ func BuildDNSMessage(record *config.LocalDNSRecord) ([]byte, error) {
 	name, err := dnsmessage.NewName(record.Name)
 	recordType := config.RecordTypeMap[record.Type]
 	if recordType == 0 {
-		return nil, errors.New("Local records question type was not set to a valid value")
+		return nil, errors.New("local records question type was not set to a valid value")
 	}
 	question := dnsmessage.Question{Name: name, Type: recordType, Class: dnsmessage.ClassINET}
 	header := dnsmessage.ResourceHeader{Name: name, Class: dnsmessage.ClassINET, TTL: record.TTL}
@@ -83,6 +83,9 @@ func BuildDNSMessage(record *config.LocalDNSRecord) ([]byte, error) {
 		}
 		targRes := dnsmessage.CNAMEResource{CNAME: fqdn}
 		err = builder.CNAMEResource(header, targRes)
+		if err != nil {
+			return nil, err
+		}
 	case "A":
 		ipv4 := [4]byte{}
 		ip := net.ParseIP(record.Target).To4()

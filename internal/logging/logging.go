@@ -18,7 +18,7 @@ var logStream = make(chan string, 32)
 
 func LogMessage(lc LogCategory, msg string) {
 	if logStream == nil {
-		log.Fatalf("%s - Log stream not initialised, InitLogging() has not been called")
+		log.Fatalf("%s - Log stream not initialised, InitLogging() has not been called", msg)
 		return
 	}
 	logStream <- string(lc) + " - " + msg

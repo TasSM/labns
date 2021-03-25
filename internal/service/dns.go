@@ -39,7 +39,7 @@ var (
 func requestUpstream(ns *config.Nameserver, payload []byte) error {
 	var target net.UDPAddr
 	if ns.IPv4 == "" && ns.IPv6 == "" {
-		return errors.New("Cannot forward to invalid upstream: neither IPv4 or IPv6 specified")
+		return errors.New("cannot forward to invalid upstream: neither IPv4 or IPv6 specified")
 	}
 	if ns.IPv4 != "" {
 		ipv4 := [4]byte{}
