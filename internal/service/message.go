@@ -6,12 +6,12 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/TasSM/labns/internal/defs"
+	"github.com/TasSM/labns/internal/config"
 	"github.com/TasSM/labns/internal/logging"
 	"golang.org/x/net/dns/dnsmessage"
 )
 
-func CreateLocalRecords(conf *defs.Configuration) (map[string][]byte, error) {
+func CreateLocalRecords(conf *config.Configuration) (map[string][]byte, error) {
 	out := make(map[string][]byte)
 	for _, v := range conf.LocalRecords {
 		msg, err := BuildDNSMessage(&v)
@@ -49,12 +49,12 @@ func GetAddressFromResource(resource dnsmessage.Resource) string {
 	return res
 }
 
-func BuildDNSMessage(record *defs.LocalDNSRecord) ([]byte, error) {
+func BuildDNSMessage(record *config.LocalDNSRecord) ([]byte, error) {
 	buf := make([]byte, 2, 514)
 	builder := dnsmessage.NewBuilder(buf, dnsmessage.Header{Response: true})
 	builder.EnableCompression()
 	name, err := dnsmessage.NewName(record.Name)
-	recordType := defs.RecordTypeMap[record.Type]
+	recordType := config.RecordTypeMap[record.Type]
 	if recordType == 0 {
 		return nil, errors.New("Local records question type was not set to a valid value")
 	}

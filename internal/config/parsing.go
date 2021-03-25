@@ -8,21 +8,50 @@ import (
 	"os"
 	"regexp"
 
-	"github.com/TasSM/labns/internal/defs"
 	"github.com/TasSM/labns/internal/logging"
+	"golang.org/x/net/dns/dnsmessage"
 )
 
-const (
-	config_path = "./test.json" //"/etc/labdns/config.json"
+type LocalDNSRecord struct {
+	Name   string
+	Type   string
+	TTL    uint32
+	Target string
+}
+
+type Nameserver struct {
+	IPv4 string
+	IPv6 string
+	Port uint16
+}
+
+type UpstreamNameservers struct {
+	Primary   Nameserver
+	Secondary Nameserver
+	TimeoutMs uint16
+}
+
+type Configuration struct {
+	LocalRecords        []LocalDNSRecord
+	UpstreamNameservers UpstreamNameservers
+}
+
+var (
+	RecordTypeMap = map[string]dnsmessage.Type{
+		"CNAME": dnsmessage.TypeCNAME,
+		"AAAA":  dnsmessage.TypeAAAA,
+		"A":     dnsmessage.TypeA,
+	}
+	PermittedRecordTypes []string = []string{"A", "AAAA", "CNAME"}
 )
 
-func LoadConfig() (*defs.Configuration, error) {
-	file, err := os.Open(config_path)
+func LoadConfig(filePath string) (*Configuration, error) {
+	file, err := os.Open(filePath)
 	if err != nil {
 		return nil, err
 	}
 	defer file.Close()
-	config := &defs.Configuration{}
+	config := &Configuration{}
 	decoder := json.NewDecoder(file)
 	err = decoder.Decode(config)
 	if err != nil {
@@ -56,7 +85,7 @@ func LoadConfig() (*defs.Configuration, error) {
 	return config, nil
 }
 
-func ValidateNameserver(ns *defs.Nameserver) error {
+func ValidateNameserver(ns *Nameserver) error {
 	if ns.Port == 0 {
 		ns.Port = 53
 	}
@@ -79,7 +108,7 @@ func ValidateNameserver(ns *defs.Nameserver) error {
 }
 
 func isValidRecordName(name string) bool {
-	matched, err := regexp.MatchString(defs.VALID_FQDN_REGEX, name)
+	matched, err := regexp.MatchString(VALID_FQDN_REGEX, name)
 	if err != nil {
 		logging.LogMessage(logging.LogFatal, err.Error())
 		return false
@@ -88,7 +117,7 @@ func isValidRecordName(name string) bool {
 }
 
 func isValidType(parsedType string) bool {
-	for _, v := range defs.PermittedRecordTypes {
+	for _, v := range PermittedRecordTypes {
 		if parsedType == v {
 			return true
 		}
@@ -107,7 +136,7 @@ func isValidTarget(parsedType string, parsedTarget string) bool {
 	case "AAAA":
 		return net.ParseIP(parsedTarget).To16() != nil
 	case "CNAME":
-		matched, err := regexp.MatchString(defs.VALID_FQDN_REGEX, parsedTarget)
+		matched, err := regexp.MatchString(VALID_FQDN_REGEX, parsedTarget)
 		if err != nil {
 			logging.LogMessage(logging.LogFatal, err.Error())
 			return false

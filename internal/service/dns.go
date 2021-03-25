@@ -4,19 +4,39 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"sync"
 	"time"
 
-	"github.com/TasSM/labns/internal/defs"
+	"github.com/TasSM/labns/internal/config"
 	"github.com/TasSM/labns/internal/logging"
 	"golang.org/x/net/dns/dnsmessage"
 )
 
-var (
-	conn     *net.UDPConn
-	stateMap map[string][]defs.PendingRequestState
+type Operation uint16
+
+type StateOperation struct {
+	Operation     Operation
+	RequestHash   string
+	RequestorAddr *net.UDPAddr
+	ByteData      []byte
+	RequestId     uint16
+}
+
+const (
+	OpCallback Operation = 1
+	OpAdd      Operation = 2
+	OpRespond  Operation = 3
+	OpDelete   Operation = 4
 )
 
-func requestUpstream(ns *defs.Nameserver, payload []byte) error {
+var (
+	lock            sync.Mutex
+	conn            *net.UDPConn
+	stateMap        map[uint16]*net.UDPAddr
+	currentUpstream string
+)
+
+func requestUpstream(ns *config.Nameserver, payload []byte) error {
 	var target net.UDPAddr
 	if ns.IPv4 == "" && ns.IPv6 == "" {
 		return errors.New("Cannot forward to invalid upstream: neither IPv4 or IPv6 specified")
@@ -36,23 +56,19 @@ func requestUpstream(ns *defs.Nameserver, payload []byte) error {
 	return nil
 }
 
-func writeResponse(res []byte, target *defs.PendingRequestState) {
-	res, err := SetResponseId(res, target.RequestId)
-	if err != nil {
-		logging.LogMessage(logging.LogFatal, err.Error())
-	}
-	go conn.WriteToUDP(res, target.Addr)
-}
-
-func switchNameservers(conf *defs.Configuration) {
+func switchNameservers(conf *config.Configuration) {
+	lock.Lock()
+	defer lock.Unlock()
 	tmp := conf.UpstreamNameservers.Primary
+	currentUpstream = conf.UpstreamNameservers.Secondary.IPv4
 	conf.UpstreamNameservers.Primary = conf.UpstreamNameservers.Secondary
 	conf.UpstreamNameservers.Secondary = tmp
 }
 
-func startStateWorker(input chan defs.StateOperation, conf *defs.Configuration) {
+func startStateWorker(input chan StateOperation, conf *config.Configuration) {
 	locConf := *conf
-	stateMap = make(map[string][]defs.PendingRequestState)
+	currentUpstream = locConf.UpstreamNameservers.Primary.IPv4
+	stateMap = make(map[uint16]*net.UDPAddr)
 	localRecords, err := CreateLocalRecords(&locConf)
 	if err != nil {
 		logging.LogMessage(logging.LogFatal, "Failed to create local record: "+err.Error())
@@ -64,81 +80,85 @@ func startStateWorker(input chan defs.StateOperation, conf *defs.Configuration) 
 				logging.LogMessage(logging.LogFatal, "Command channel closed, killing state worker")
 				return
 			}
-			if op.Operation == 0 || op.RequestKey == "" {
+			if op.Operation == 0 || (op.RequestHash == "" && op.RequestId == 0) {
 				logging.LogMessage(logging.LogError, "Received invalid state operation, continuing...")
 				continue
 			}
 			switch op.Operation {
-			case defs.OpAdd:
-				if op.RequestData == nil || op.ByteData == nil || op.RequestKey == "" {
+			case OpAdd:
+				if op.RequestorAddr == nil || op.ByteData == nil || op.RequestHash == "" || op.RequestId == 0 {
 					logging.LogMessage(logging.LogError, "Bad OpAdd (missing required data), continuing...")
 					continue
 				}
-				if localRecords[op.RequestKey] != nil {
-					logging.LogMessage(logging.LogInfo, "Found local record with matching key: "+op.RequestKey)
-					go writeResponse(localRecords[op.RequestKey], op.RequestData)
+				if localRecords[op.RequestHash] != nil {
+					logging.LogMessage(logging.LogInfo, "Found local record with matching key: "+op.RequestHash)
+					res, err := SetResponseId(localRecords[op.RequestHash], op.RequestId)
+					if err != nil {
+						logging.LogMessage(logging.LogFatal, err.Error())
+						continue
+					}
+					go conn.WriteToUDP(res, op.RequestorAddr)
 					continue
 				}
-				if stateMap[op.RequestKey] == nil {
-					stateMap[op.RequestKey] = make([]defs.PendingRequestState, 16)
-				}
-				stateMap[op.RequestKey] = append(stateMap[op.RequestKey], *op.RequestData)
+				//check cache here
+				stateMap[op.RequestId] = op.RequestorAddr
 				err := requestUpstream(&locConf.UpstreamNameservers.Primary, op.ByteData)
 				if err != nil {
 					logging.LogMessage(logging.LogError, "Unable to forward request to upstream: "+err.Error())
 				}
 				go func() {
 					time.Sleep(time.Duration(locConf.UpstreamNameservers.TimeoutMs) * time.Millisecond)
-					input <- defs.StateOperation{Operation: defs.OpCallback, RequestKey: op.RequestKey, ByteData: op.ByteData}
+					input <- StateOperation{Operation: OpCallback, ByteData: op.ByteData, RequestId: op.RequestId, RequestorAddr: op.RequestorAddr}
 				}()
-			case defs.OpCallback:
-				if stateMap[op.RequestKey] == nil || len(stateMap[op.RequestKey]) == 0 {
+			case OpCallback:
+				if op.ByteData == nil || op.RequestorAddr == nil || op.RequestId == 0 {
+					logging.LogMessage(logging.LogError, "Bad OpCallback (missing required data), continuing...")
 					continue
 				}
-				if op.ByteData == nil || op.RequestKey == "" {
-					logging.LogMessage(logging.LogError, "Bad OpCallback (missing required data), continuing...")
+				if stateMap[op.RequestId] == nil {
 					continue
 				}
 				err := requestUpstream(&locConf.UpstreamNameservers.Secondary, op.ByteData)
 				if err != nil {
 					logging.LogMessage(logging.LogError, "Unable to forward request to upstream: "+err.Error())
 				}
+				logging.LogMessage(logging.LogInfo, "Primary upstream timed out, switching primary ("+locConf.UpstreamNameservers.Primary.IPv4+") and secondary ("+locConf.UpstreamNameservers.Secondary.IPv4+")")
 				switchNameservers(&locConf)
 				go func() {
 					time.Sleep(time.Duration(locConf.UpstreamNameservers.TimeoutMs) * time.Millisecond)
-					input <- defs.StateOperation{Operation: defs.OpDelete, RequestKey: op.RequestKey}
+					input <- StateOperation{Operation: OpDelete, RequestId: op.RequestId}
 				}()
-			case defs.OpRespond:
-				if op.Conn == nil || op.ByteData == nil || op.RequestKey == "" {
+			case OpRespond:
+				if op.ByteData == nil || op.RequestId == 0 {
 					logging.LogMessage(logging.LogError, "Bad OpRespond (missing required data), continuing...")
 					continue
 				}
-				if stateMap[op.RequestKey] == nil || len(stateMap[op.RequestKey]) == 0 {
-					logging.LogMessage(logging.LogDebug, "OpRespond ignored for missing key "+op.RequestKey)
+				if stateMap[op.RequestId] == nil {
+					logging.LogMessage(logging.LogDebug, "OpRespond ignored for missing key "+op.RequestHash)
 					continue
 				}
-				if len(stateMap[op.RequestKey]) == 1 {
-					go conn.WriteToUDP(op.ByteData, op.RequestData.Addr)
-				}
-				for _, v := range stateMap[op.RequestKey] {
-					writeResponse(op.ByteData, &v)
-				}
-				delete(stateMap, op.RequestKey)
-			case defs.OpDelete:
-				if stateMap[op.RequestKey] == nil || len(stateMap[op.RequestKey]) == 0 {
+				go conn.WriteToUDP(op.ByteData, stateMap[op.RequestId])
+				delete(stateMap, op.RequestId)
+			case OpDelete:
+				if op.RequestId == 0 {
+					logging.LogMessage(logging.LogError, "Bad OpDelete (missing required data), continuing...")
 					continue
 				}
-				logging.LogMessage(logging.LogError, "Request for key "+op.RequestKey+" has timed out on both upstream nameservers")
+				if stateMap[op.RequestId] == nil {
+					continue
+				}
+				logging.LogMessage(logging.LogError, "Request for key "+op.RequestHash+" has timed out on both upstream nameservers")
 				switchNameservers(&locConf)
-				delete(stateMap, op.RequestKey)
+				delete(stateMap, op.RequestId)
 			}
 		}
 	}
 }
 
-func StartDNSService(c *net.UDPConn, conf *defs.Configuration) {
+func StartDNSService(c *net.UDPConn, conf *config.Configuration) {
 	conn = c
-	reqChan := make(chan defs.StateOperation, 64)
+	reqChan := make(chan StateOperation, 64)
+	var logMsg string
 	go startStateWorker(reqChan, conf)
 	logging.LogMessage(logging.LogInfo, "Starting Listener service on port "+conn.LocalAddr().String())
 	for {
@@ -152,19 +172,27 @@ func StartDNSService(c *net.UDPConn, conf *defs.Configuration) {
 		}
 		packed, _ := m.Pack()
 		key, err := HashMessageFields(&packed)
+		if err != nil {
+			logging.LogMessage(logging.LogFatal, err.Error())
+		}
 		if m.Header.Response {
-			logging.LogMessage(logging.LogInfo, fmt.Sprintf("Received resource response from upstream %s for %s: %s", conf.UpstreamNameservers.Primary.IPv4, m.Questions[0].Name, GetAddressFromResource(m.Answers[0])))
-			if err != nil {
-				logging.LogMessage(logging.LogFatal, err.Error())
+			lock.Lock()
+			logMsg = fmt.Sprintf("Received %s response from upstream %s for %s", m.Questions[0].Type, currentUpstream, m.Questions[0].Name)
+			lock.Unlock()
+			if len(m.Answers) > 0 {
+				logMsg = logMsg + GetAddressFromResource(m.Answers[0])
+			} else {
+				logMsg = logMsg + ": empty "
 			}
-			reqChan <- defs.StateOperation{Operation: defs.OpRespond, RequestKey: key, ByteData: packed, Conn: conn}
+			logging.LogMessage(logging.LogInfo, logMsg)
+			reqChan <- StateOperation{Operation: OpRespond, RequestId: m.ID, ByteData: packed}
 			continue
 		} else {
-			logging.LogMessage(logging.LogInfo, fmt.Sprintf("Received resource request for %v", m.Questions[0].Name))
-			if err != nil {
-				logging.LogMessage(logging.LogFatal, err.Error())
+			if len(m.Questions) == 0 {
+				continue
 			}
-			reqChan <- defs.StateOperation{Operation: defs.OpAdd, RequestKey: key, RequestData: &defs.PendingRequestState{Addr: addr, RequestId: m.ID}, ByteData: packed}
+			logging.LogMessage(logging.LogInfo, fmt.Sprintf("Received resource request for %v", m.Questions[0].Name))
+			reqChan <- StateOperation{Operation: OpAdd, RequestHash: key, RequestorAddr: addr, RequestId: m.ID, ByteData: packed}
 		}
 	}
 }

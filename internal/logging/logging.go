@@ -25,10 +25,14 @@ func LogMessage(lc LogCategory, msg string) {
 }
 
 func InitLogging(logPath string) {
-	f, _ := os.OpenFile(logPath, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
-	defer f.Close()
-	log.SetOutput(f)
-	//LogStream = make(chan string, 32)
+	logToFile := false
+	var f *os.File
+	if logPath != "" {
+		logToFile = true
+		f, _ = os.OpenFile(logPath, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
+		defer f.Close()
+		log.SetOutput(f)
+	}
 	for {
 		select {
 		case msg, ok := <-logStream:
@@ -37,7 +41,9 @@ func InitLogging(logPath string) {
 				return
 			}
 			log.Println(msg)
-			f.Sync()
+			if logToFile {
+				f.Sync()
+			}
 			switch msg {
 			case string(LogFatal):
 				os.Exit(1)
