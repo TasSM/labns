@@ -100,7 +100,7 @@ func startStateWorker(input chan StateOperation, conf *config.Configuration) {
 					go conn.WriteToUDP(res, op.RequestorAddr)
 					continue
 				}
-				//check cache here
+				//TODO: caching
 				stateMap[op.RequestId] = op.RequestorAddr
 				err := requestUpstream(&locConf.UpstreamNameservers.Primary, op.ByteData)
 				if err != nil {

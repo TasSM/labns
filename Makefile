@@ -4,7 +4,7 @@ test:
 	go test -race ./...
 
 run:
-	go run -race cmd/labns/main.go
+	go run -race ./cmd/labns/main.go
 
 build:
-	go build -o /bin/main cmd/labns/main.gn
+	go build -o ./bin/main ./cmd/labns/main.go

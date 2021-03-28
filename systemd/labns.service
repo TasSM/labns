@@ -1,0 +1,12 @@
+[Unit]
+Description=The labns DNS Name Server
+After=network.target
+
+[Service]
+Type=simple
+Restart=always
+EnvironmentFile=/etc/labns/service.conf
+ExecStart=/usr/local/bin/labns
+
+[Install]
+WantedBy=multi-user.target

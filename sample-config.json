@@ -1,0 +1,12 @@
+{
+    "LocalRecords": [
+        {"Name":"test.domain.", "Type": "A", "TTL": 9999, "Target": "1.2.3.4"},
+        {"Name":"www.test.domain.", "Type": "CNAME", "TTL": 9999, "Target": "test.domain."},
+        {"Name":"test.domain.", "Type":"AAAA", "TTL": 9991, "Target":"2404:6800:4006:813::200e"}
+    ],
+    "UpstreamNameservers": {
+        "Primary": {"IPv4": "1.1.1.1", "Port": 53},
+        "Secondary": {"IPv4": "1.1.2.2", "Port": 53},
+        "TimeoutMS": 5000
+    }
+}
